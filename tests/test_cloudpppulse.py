@@ -1,4 +1,3 @@
-
 import unittest
 
 from main import CloudPulse
@@ -7,7 +6,6 @@ from main import CloudPulse
 class TestCloudPulseReliability(unittest.TestCase):
 
     def setUp(self):
-        # Disable sleep delays to keep tests fast.
         self.cloud = CloudPulse(
             max_retries=2,
             enable_delays=False
@@ -30,7 +28,7 @@ class TestCloudPulseReliability(unittest.TestCase):
 
         self.cloud.process_next_job()
 
-        high_job = self.cloud.get_job(2)
+        high_job = self.cloud.get_job(1)
         self.assertEqual(high_job["status"], "completed")
 
     def test_retry_eventually_succeeds(self):
@@ -43,7 +41,9 @@ class TestCloudPulseReliability(unittest.TestCase):
         job = self.cloud.get_job(0)
         self.assertEqual(job["status"], "completed")
         self.assertEqual(job["attempts"], 3)
-        self.assertEqual(self.cloud.metrics["retries_scheduled"], 2)
+        self.assertEqual(
+            self.cloud.metrics["retries_scheduled"], 2
+        )
 
     def test_retry_limit_marks_permanent_failure(self):
         self.cloud.add_job(
@@ -73,6 +73,24 @@ class TestCloudPulseReliability(unittest.TestCase):
 
         self.assertEqual(self.cloud.metrics["jobs_submitted"], 1)
         self.assertEqual(self.cloud.metrics["jobs_completed"], 1)
+
+    def test_get_job_status(self):
+        self.cloud.add_job("Order", 1, "order-status")
+
+        status = self.cloud.get_job_status(0)
+
+        self.assertEqual(status, "pending")
+
+    def test_get_missing_job_status(self):
+        status = self.cloud.get_job_status(999)
+
+        self.assertEqual(status, "not_found")
+
+    def test_invalid_priority_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.cloud.add_job(
+                "Invalid job", 1.5, "invalid-priority"
+            )
 
 
 if __name__ == "__main__":

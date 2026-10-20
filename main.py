@@ -1,4 +1,3 @@
-
 import heapq
 import itertools
 import time
@@ -8,14 +7,14 @@ class CloudPulse:
     def __init__(self, max_retries=3, enable_delays=True):
         self.jobs = []
         self.job_counter = itertools.count()
+        self.queue_counter = itertools.count()
+
         self.max_retries = max_retries
         self.enable_delays = enable_delays
 
-        # Track request keys and all submitted jobs.
         self.idempotency_keys = {}
         self.jobs_by_id = {}
 
-        # Operational metrics.
         self.metrics = {
             "jobs_submitted": 0,
             "jobs_completed": 0,
@@ -25,12 +24,16 @@ class CloudPulse:
             "duplicates_blocked": 0,
         }
 
-    def add_job(self, name, priority, idempotency_key,
-                fail_first_n=0):
+    def add_job(
+        self, name, priority, idempotency_key, fail_first_n=0
+    ):
         if not isinstance(priority, int) or isinstance(priority, bool):
             raise ValueError("Priority must be an integer.")
 
-        if not isinstance(fail_first_n, int) or fail_first_n < 0:
+        if not isinstance(fail_first_n, int) or isinstance(fail_first_n, bool):
+            raise ValueError("fail_first_n must be a non-negative integer.")
+
+        if fail_first_n < 0:
             raise ValueError("fail_first_n must be non-negative.")
 
         if not isinstance(idempotency_key, str) or not idempotency_key.strip():
@@ -63,21 +66,31 @@ class CloudPulse:
         self.idempotency_keys[idempotency_key] = request
         self.jobs_by_id[job_id] = job
         self.metrics["jobs_submitted"] += 1
+
         self._schedule(job)
 
         print(f"Added job #{job_id}: {name}")
         return True
 
     def _schedule(self, job):
-        queue_id = next(self.job_counter)
+        queue_id = next(self.queue_counter)
         heapq.heappush(
             self.jobs,
             (job["priority"], queue_id, job)
         )
 
     def get_job(self, job_id):
-        """Return the current record for a job."""
+        """Return a job record, or None if it does not exist."""
         return self.jobs_by_id.get(job_id)
+
+    def get_job_status(self, job_id):
+        """Return the job status or 'not_found' for an unknown ID."""
+        job = self.get_job(job_id)
+
+        if job is None:
+            return "not_found"
+
+        return job["status"]
 
     def process_next_job(self):
         if not self.jobs:
@@ -85,6 +98,7 @@ class CloudPulse:
             return None
 
         _, _, job = heapq.heappop(self.jobs)
+
         job["status"] = "processing"
         job["attempts"] += 1
 
@@ -93,7 +107,7 @@ class CloudPulse:
             f"(attempt {job['attempts']})"
         )
 
-        # Deterministic failure simulation for testing.
+        # Simulate a predictable number of initial failures.
         failed = job["attempts"] <= job["fail_first_n"]
 
         if not failed:
@@ -109,6 +123,7 @@ class CloudPulse:
 
         if retries_used < self.max_retries:
             delay = 2 ** retries_used
+
             job["status"] = "retrying"
             self.metrics["retries_scheduled"] += 1
 
@@ -131,10 +146,12 @@ class CloudPulse:
 
     def show_metrics(self):
         print("\n--- CloudPulse Metrics ---")
+
         for name, value in self.metrics.items():
             print(f"{name}: {value}")
 
         print("\n--- Job Status ---")
+
         for job in self.jobs_by_id.values():
             print(
                 f"#{job['id']} {job['name']}: "
