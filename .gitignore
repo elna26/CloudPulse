@@ -1,8 +1,29 @@
-
-.venv/
+# Python
 __pycache__/
 *.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+
+# Environment variables
 .env
-.vscode/
+.env.*
+
+# Testing
 .pytest_cache/
 .coverage
+htmlcov/
+
+# IDE
+.vscode/
+
+# Local database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+*.tmp
+*.log
