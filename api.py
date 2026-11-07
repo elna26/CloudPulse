@@ -1,9 +1,18 @@
 
 import logging
+import os
+import hmac
 from uuid import uuid4
 
-from fastapi import FastAPI, Depends, HTTPException, Query, Request
+from fastapi import (
+    FastAPI,
+    Depends,
+    HTTPException,
+    Query,
+    Request
+)
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -27,6 +36,34 @@ logger = logging.getLogger("CloudPulse.API")
 
 
 # --------------------------------------------------
+# API SECURITY
+# --------------------------------------------------
+
+api_key_header = APIKeyHeader(
+    name="X-API-Key",
+    auto_error=False
+)
+
+
+def require_api_key(api_key: str | None = Depends(api_key_header)):
+    expected_key = os.getenv("CLOUDPULSE_API_KEY")
+
+    if not expected_key:
+        raise HTTPException(
+            status_code=503,
+            detail="API authentication is not configured."
+        )
+
+    if not api_key or not hmac.compare_digest(api_key, expected_key):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing API key."
+        )
+
+    return True
+
+
+# --------------------------------------------------
 # APPLICATION INITIALIZATION
 # --------------------------------------------------
 
@@ -47,6 +84,7 @@ Features:
 - Database-backed job processing
 - Health monitoring
 - Worker metrics and monitoring
+- API key authentication
 """,
     version="1.0.0",
     contact={"name": "CloudPulse Developer"},
@@ -191,7 +229,8 @@ def health_check(db: Session = Depends(get_db)):
 @app.get(
     "/workers/metrics",
     tags=["Workers"],
-    summary="Retrieve background worker metrics"
+    summary="Retrieve background worker metrics",
+    dependencies=[Depends(require_api_key)]
 )
 def get_all_worker_metrics(db: Session = Depends(get_db)):
 
@@ -228,7 +267,8 @@ def get_all_worker_metrics(db: Session = Depends(get_db)):
 @app.post(
     "/jobs",
     status_code=201,
-    tags=["Jobs"]
+    tags=["Jobs"],
+    dependencies=[Depends(require_api_key)]
 )
 def create_job(job: JobCreate, db: Session = Depends(get_db)):
 
@@ -284,7 +324,11 @@ def create_job(job: JobCreate, db: Session = Depends(get_db)):
 # LIST, FILTER, PAGINATE AND SORT JOBS
 # --------------------------------------------------
 
-@app.get("/jobs", tags=["Jobs"])
+@app.get(
+    "/jobs",
+    tags=["Jobs"],
+    dependencies=[Depends(require_api_key)]
+)
 def list_jobs(
     status: str | None = Query(default=None),
     priority: int | None = Query(default=None, ge=1, le=10),
@@ -353,7 +397,11 @@ def list_jobs(
 # GET JOB BY ID
 # --------------------------------------------------
 
-@app.get("/jobs/{job_id}", tags=["Jobs"])
+@app.get(
+    "/jobs/{job_id}",
+    tags=["Jobs"],
+    dependencies=[Depends(require_api_key)]
+)
 def get_job(job_id: int, db: Session = Depends(get_db)):
 
     job = db.query(models.Job).filter(
@@ -385,7 +433,11 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
 # UPDATE JOB
 # --------------------------------------------------
 
-@app.put("/jobs/{job_id}", tags=["Jobs"])
+@app.put(
+    "/jobs/{job_id}",
+    tags=["Jobs"],
+    dependencies=[Depends(require_api_key)]
+)
 def update_job(
     job_id: int,
     update: JobUpdate,
@@ -441,7 +493,8 @@ def update_job(
 @app.post(
     "/jobs/{job_id}/process",
     tags=["Jobs"],
-    summary="Process a job using the database worker"
+    summary="Process a job using the database worker",
+    dependencies=[Depends(require_api_key)]
 )
 def process_job(job_id: int, db: Session = Depends(get_db)):
 
@@ -488,7 +541,11 @@ def process_job(job_id: int, db: Session = Depends(get_db)):
 # DELETE JOB
 # --------------------------------------------------
 
-@app.delete("/jobs/{job_id}", tags=["Jobs"])
+@app.delete(
+    "/jobs/{job_id}",
+    tags=["Jobs"],
+    dependencies=[Depends(require_api_key)]
+)
 def delete_job(job_id: int, db: Session = Depends(get_db)):
 
     job = db.query(models.Job).filter(
