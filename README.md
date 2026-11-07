@@ -65,6 +65,29 @@ AWS-related components are tested locally using Moto mocks.
 - Median execution-time measurements.
 - Submission and processing throughput measurements.
 
+### Advanced Performance Benchmarking
+- In-memory priority queue performance testing.
+- Workloads of 1,000, 5,000, and 10,000 jobs.
+- Five benchmark runs per workload.
+- Median execution-time measurements.
+- Individual job submission latency.
+- Average, P50, P95, and P99 latency metrics.
+- Jobs-per-second throughput measurement.
+- Python peak memory tracking using tracemalloc.
+
+#### Benchmark Results
+
+| Metric | 1,000 Jobs | 5,000 Jobs | 10,000 Jobs |
+|---|---:|---:|---:|
+| Throughput (jobs/sec) | 19,478.90 | 15,388.56 | 14,457.45 |
+| Average Latency (ms) | 0.0390 | 0.0497 | 0.0519 |
+| P95 Latency (ms) | 0.0570 | 0.0713 | 0.0739 |
+| P99 Latency (ms) | 0.1100 | 0.1273 | 0.1412 |
+| Peak Memory (MB) | 0.52 | 3.11 | 6.37 |
+
+*Results are from local in-memory benchmarks and are hardware-dependent.*
+
+
 ## Technology Stack
 
 | Technology | Purpose |
