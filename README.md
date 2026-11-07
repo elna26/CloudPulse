@@ -40,6 +40,7 @@ The project combines FastAPI, SQLAlchemy, SQLite, PostgreSQL, background workers
 - REST API endpoint for worker metrics.
 
 ### AWS Service Simulations
+
 AWS-related components are tested locally using Moto mocks.
 
 - Amazon SQS queue simulation.
@@ -50,6 +51,19 @@ AWS-related components are tested locally using Moto mocks.
 - CloudWatch metric simulation.
 
 **Note:** These components demonstrate AWS integration concepts locally. They are not deployed to a live AWS account.
+
+### Continuous Integration
+- GitHub Actions workflow.
+- Automatic test execution on pushes to `main`.
+- Automatic test execution on pull requests targeting `main`.
+- Python 3.11 test environment.
+
+### Performance Benchmarking
+- In-memory priority queue benchmarking.
+- Tests with 1,000, 5,000, and 10,000 jobs.
+- Five runs per workload.
+- Median execution-time measurements.
+- Submission and processing throughput measurements.
 
 ## Technology Stack
 
@@ -65,11 +79,19 @@ AWS-related components are tested locally using Moto mocks.
 | Moto | AWS service mocking |
 | Pytest | Automated testing |
 | Uvicorn | API server |
+| GitHub Actions | Continuous integration |
 
 ## Project Structure
 
 ```text
 CloudPulse/
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+│
+├── benchmarks/
+│   └── benchmark_queue.py
 │
 ├── api.py
 ├── main.py
@@ -133,7 +155,7 @@ python -m pip install -r requirements.txt
 
 Start the FastAPI server:
 
-```bash
+```powershell
 uvicorn api:app --reload
 ```
 
@@ -145,96 +167,4 @@ http://127.0.0.1:8000/docs
 
 ## Database Configuration
 
-CloudPulse supports SQLite by default and PostgreSQL when the PostgreSQL password environment variable is configured.
-
-For PostgreSQL, set the password locally in PowerShell:
-
-```powershell
-$env:CLOUDPULSE_DB_PASSWORD = Read-Host "Enter PostgreSQL password"
-```
-
-Create the SQLAlchemy tables:
-
-```powershell
-python -c "from database import Base, engine; from models import Job, WorkerMetric; Base.metadata.create_all(bind=engine); print('Tables created successfully')"
-```
-
-The PostgreSQL server and `cloudpulse` database must already be configured.
-
-Keep the password private. Do not commit credentials or `.env` files to GitHub.
-
-## Running the Background Worker
-
-Open a separate PowerShell terminal, activate the virtual environment, and configure the same PostgreSQL environment variable.
-
-Run:
-
-```powershell
-python worker.py
-```
-
-The worker continuously checks for pending jobs, processes available work, updates metrics, and attempts to recover abandoned jobs.
-
-Press `Ctrl + C` to stop the worker.
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/` | Application information |
-| GET | `/health` | Health check |
-| POST | `/jobs` | Create a job |
-| GET | `/jobs` | Retrieve jobs |
-| GET | `/jobs/{job_id}` | Retrieve a specific job |
-| PUT | `/jobs/{job_id}` | Update a job |
-| POST | `/jobs/{job_id}/process` | Process a job |
-| DELETE | `/jobs/{job_id}` | Delete a job |
-| GET | `/workers/metrics` | Retrieve worker metrics |
-
-## Running Tests
-
-Run the complete test suite:
-
-```powershell
-python -m pytest -v
-```
-
-The project has **21 passing tests** in the verified development environment.
-
-PostgreSQL-specific tests require PostgreSQL configuration. Tests that depend on PostgreSQL are skipped when the database password environment variable is not configured.
-
-## Reliability Concepts Demonstrated
-
-CloudPulse demonstrates several backend engineering concepts:
-
-- Priority queues and job scheduling.
-- Retry strategies and exponential backoff.
-- Idempotent job creation.
-- Relational database persistence.
-- Atomic database updates.
-- Concurrent worker execution.
-- Abandoned job recovery.
-- Worker metrics and monitoring.
-- Mock-based AWS integration testing.
-
-## Current Limitations
-
-- AWS services are simulated locally using Moto rather than deployed to AWS.
-- The worker recovery mechanism uses a fixed timeout and does not implement a renewable lease.
-- The project does not currently provide production-grade distributed coordination or deployment infrastructure.
-
-## Future Improvements
-
-- Live AWS deployment.
-- Docker containerization.
-- CI/CD automation.
-- Redis-based distributed coordination.
-- Enhanced worker health monitoring.
-- Production-grade job recovery and lease management.
-- Cloud deployment and scalability improvements.
-
-## Author
-
-**CloudPulse — A Backend Engineering Project**
-
-GitHub: https://github.com/elna26/CloudPulse
+CloudPulse supports SQLite by default and PostgreSQL when the PostgreSQL password environment
