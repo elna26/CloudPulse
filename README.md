@@ -1,35 +1,70 @@
-# CloudPulse — Intelligent Job Queue System
+# CloudPulse
 
-CloudPulse is a Python-based job queue and failure recovery system designed to manage background jobs reliably through priority scheduling, automatic retries, idempotency protection and REST API integration.
+**A Reliable, Database-Backed Job Queue and Background Worker System**
 
-The project explores backend engineering concepts including job scheduling, database persistence, API development, failure handling and automated testing.
+CloudPulse is a Python-based job processing system designed to demonstrate reliable job scheduling, priority-based execution, retry handling, database persistence, worker concurrency, and monitoring.
+
+The project combines FastAPI, SQLAlchemy, SQLite, PostgreSQL, background workers, and AWS service simulations using Moto.
 
 ## Features
 
-- **Priority-Based Scheduling:** Schedule jobs according to priority.
-- **Automatic Retry Handling:** Retry failed jobs with failure recovery logic.
-- **Exponential Backoff:** Introduce delays between retry attempts.
-- **Idempotency Protection:** Prevent duplicate job submissions using idempotency keys.
-- **Job Management:** Create, retrieve, update, process and delete jobs.
-- **Job Status Tracking:** Monitor job execution states.
-- **Filtering and Sorting:** Search jobs using status and priority filters.
-- **Pagination:** Retrieve job records in manageable batches.
-- **Database Persistence:** Store job information using SQLite.
-- **Health Monitoring:** Check API health.
-- **REST API:** Interact with the system through FastAPI endpoints.
-- **API Documentation:** Explore endpoints through interactive Swagger UI.
+### Job Processing
+- Priority-based job scheduling.
+- Job creation, retrieval, updating, and deletion.
+- Automatic retry handling.
+- Configurable maximum retry attempts.
+- Idempotency protection to prevent duplicate jobs.
+- Job status tracking.
+- Simulated job failures for reliability testing.
+
+### Database Support
+- SQLite support for local development.
+- PostgreSQL integration using SQLAlchemy and Psycopg.
+- Persistent job records.
+- Database-backed worker metrics.
+- Database constraints and indexes.
+
+### Background Workers
+- Continuous job polling.
+- Multiple worker execution.
+- Atomic job claiming using conditional database updates.
+- Prevention of multiple workers claiming the same pending job.
+- Recovery of abandoned processing jobs.
+- Worker heartbeat and status tracking.
+
+### Monitoring and Observability
+- Jobs claimed, completed, and failed.
+- Retry and recovery tracking.
+- Total processing attempts.
+- Worker status and heartbeat timestamps.
+- REST API endpoint for worker metrics.
+
+### AWS Service Simulations
+AWS-related components are tested locally using Moto mocks.
+
+- Amazon SQS queue simulation.
+- Dead-letter queue handling.
+- AWS worker simulation.
+- Lambda-style event handler.
+- DynamoDB table simulation.
+- CloudWatch metric simulation.
+
+**Note:** These components demonstrate AWS integration concepts locally. They are not deployed to a live AWS account.
 
 ## Technology Stack
 
 | Technology | Purpose |
 |---|---|
-| Python | Backend development |
-| FastAPI | REST API framework |
-| SQLAlchemy | Database interaction |
-| SQLite | Database persistence |
-| Pydantic | Request validation |
+| Python | Core application |
+| FastAPI | REST API |
+| SQLAlchemy | Database ORM |
+| SQLite | Local database |
+| PostgreSQL | Persistent database |
+| Psycopg | PostgreSQL connectivity |
+| Boto3 | AWS SDK |
+| Moto | AWS service mocking |
 | Pytest | Automated testing |
-| Git and GitHub | Version control |
+| Uvicorn | API server |
 
 ## Project Structure
 
@@ -38,120 +73,168 @@ CloudPulse/
 │
 ├── api.py
 ├── main.py
-├── database.py
 ├── models.py
-├── cloudpulse.db
+├── database.py
+├── database_postgres.py
+├── database_worker.py
+├── worker.py
+│
+├── aws_database.py
+├── aws_dynamodb.py
+├── aws_integration.py
+├── aws_lambda.py
+├── aws_monitoring.py
+├── aws_queue.py
+├── aws_worker.py
+│
+├── tests/
+│   ├── test_cloudpppulse.py
+│   ├── test_concurrency.py
+│   ├── test_postgres.py
+│   ├── test_aws_integration.py
+│   ├── test_dlq.py
+│   ├── test_dynamodb.py
+│   ├── test_lambda.py
+│   └── test_monitoring.py
+│
 ├── requirements.txt
 ├── README.md
-├── .gitignore
-│
-└── tests/
-    └── test_cloudpppulse.py
+└── .gitignore
 ```
 
-## Installation and Setup
+## Installation
 
-### 1. Clone the repository
+Clone the repository:
 
 ```bash
 git clone https://github.com/elna26/CloudPulse.git
 cd CloudPulse
 ```
 
-### 2. Create a virtual environment
+Create a virtual environment:
 
 ```bash
 python -m venv .venv
 ```
 
-### 3. Activate the virtual environment
-
-Windows PowerShell:
+Activate it on Windows PowerShell:
 
 ```powershell
 .venv\Scripts\Activate.ps1
 ```
 
-### 4. Install dependencies
+Install dependencies:
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-## Run the Application
+## Running the API
 
 Start the FastAPI server:
 
 ```bash
-python -m uvicorn api:app --reload
+uvicorn api:app --reload
 ```
 
-The application will run at:
+Open the interactive API documentation:
 
-`http://127.0.0.1:8000`
+```text
+http://127.0.0.1:8000/docs
+```
 
-## API Documentation
+## Database Configuration
 
-Interactive Swagger documentation:
+CloudPulse supports SQLite by default and PostgreSQL when the PostgreSQL password environment variable is configured.
 
-`http://127.0.0.1:8000/docs`
+For PostgreSQL, set the password locally in PowerShell:
 
-Alternative API documentation:
+```powershell
+$env:CLOUDPULSE_DB_PASSWORD = Read-Host "Enter PostgreSQL password"
+```
 
-`http://127.0.0.1:8000/redoc`
+Create the SQLAlchemy tables:
 
-## Available API Endpoints
+```powershell
+python -c "from database import Base, engine; from models import Job, WorkerMetric; Base.metadata.create_all(bind=engine); print('Tables created successfully')"
+```
+
+The PostgreSQL server and `cloudpulse` database must already be configured.
+
+Keep the password private. Do not commit credentials or `.env` files to GitHub.
+
+## Running the Background Worker
+
+Open a separate PowerShell terminal, activate the virtual environment, and configure the same PostgreSQL environment variable.
+
+Run:
+
+```powershell
+python worker.py
+```
+
+The worker continuously checks for pending jobs, processes available work, updates metrics, and attempts to recover abandoned jobs.
+
+Press `Ctrl + C` to stop the worker.
+
+## API Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/` | API welcome endpoint |
-| GET | `/health` | Check API health |
+| GET | `/` | Application information |
+| GET | `/health` | Health check |
 | POST | `/jobs` | Create a job |
-| GET | `/jobs` | List and search jobs |
-| GET | `/jobs/{job_id}` | Retrieve a job |
-| PUT | `/jobs/{job_id}` | Update a pending job |
-| DELETE | `/jobs/{job_id}` | Delete a job |
+| GET | `/jobs` | Retrieve jobs |
+| GET | `/jobs/{job_id}` | Retrieve a specific job |
+| PUT | `/jobs/{job_id}` | Update a job |
 | POST | `/jobs/{job_id}/process` | Process a job |
+| DELETE | `/jobs/{job_id}` | Delete a job |
+| GET | `/workers/metrics` | Retrieve worker metrics |
 
-## Run Automated Tests
+## Running Tests
 
-```bash
+Run the complete test suite:
+
+```powershell
 python -m pytest -v
 ```
 
-Current verified result: **9 tests passed**.
+The project has **21 passing tests** in the verified development environment.
+
+PostgreSQL-specific tests require PostgreSQL configuration. Tests that depend on PostgreSQL are skipped when the database password environment variable is not configured.
+
+## Reliability Concepts Demonstrated
+
+CloudPulse demonstrates several backend engineering concepts:
+
+- Priority queues and job scheduling.
+- Retry strategies and exponential backoff.
+- Idempotent job creation.
+- Relational database persistence.
+- Atomic database updates.
+- Concurrent worker execution.
+- Abandoned job recovery.
+- Worker metrics and monitoring.
+- Mock-based AWS integration testing.
 
 ## Current Limitations
 
-- SQLite is currently used as the application database.
-- Job processing and failure handling are implemented as a prototype.
-- AWS services have not yet been integrated.
-- Production deployment, distributed workers and advanced monitoring are future improvements.
+- AWS services are simulated locally using Moto rather than deployed to AWS.
+- The worker recovery mechanism uses a fixed timeout and does not implement a renewable lease.
+- The project does not currently provide production-grade distributed coordination or deployment infrastructure.
 
-## Planned Improvements
+## Future Improvements
 
-- AWS EC2 deployment
-- AWS RDS integration
-- Amazon DynamoDB for NoSQL storage
-- Amazon CloudWatch monitoring
-- Docker containerisation
-- GitHub Actions CI/CD
-- Redis caching
-- Background workers and concurrency improvements
-- Performance and load testing
+- Live AWS deployment.
+- Docker containerization.
+- CI/CD automation.
+- Redis-based distributed coordination.
+- Enhanced worker health monitoring.
+- Production-grade job recovery and lease management.
+- Cloud deployment and scalability improvements.
 
-## Learning Objectives
+## Author
 
-CloudPulse is an ongoing engineering project focused on developing practical experience with:
+**CloudPulse — A Backend Engineering Project**
 
-- Backend API development
-- Database systems
-- Job scheduling and reliability
-- Debugging and troubleshooting
-- Automated testing
-- Git and GitHub workflows
-- Cloud infrastructure and DevOps
-
-## License
-
-This project is licensed under the MIT License.
+GitHub: https://github.com/elna26/CloudPulse

@@ -1,18 +1,33 @@
 
+import logging
+from uuid import uuid4
+
 from fastapi import FastAPI, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
 
 from database import engine, get_db
-from main import CloudPulse
+from database_worker import process_database_job
 import models
 
 
 # --------------------------------------------------
+# LOGGING
+# --------------------------------------------------
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+)
+
+logger = logging.getLogger("CloudPulse.API")
+
+
+# --------------------------------------------------
 # APPLICATION INITIALIZATION
-# STEP 25: PROFESSIONAL API DOCUMENTATION
 # --------------------------------------------------
 
 app = FastAPI(
@@ -20,35 +35,22 @@ app = FastAPI(
     description="""
 # CloudPulse – Intelligent Job Queue System
 
-CloudPulse is a reliable job queue and failure recovery system
-designed to manage background jobs efficiently.
+A reliable job queue and failure recovery system.
 
-## Features
-
-- Create and manage jobs
-- Priority-based job scheduling
+Features:
+- Job creation and management
+- Priority-based scheduling
 - Automatic retry and failure handling
 - Idempotency protection
-- Job filtering and sorting
-- Pagination
-- Database persistence
+- Job filtering, sorting and pagination
+- PostgreSQL and SQLite support
+- Database-backed job processing
 - Health monitoring
-- REST API integration
-
-## API Usage
-
-Use these endpoints to create, retrieve, update, process
-and delete jobs.
-
-All API responses use JSON format.
+- Worker metrics and monitoring
 """,
     version="1.0.0",
-    contact={
-        "name": "CloudPulse Developer"
-    },
-    license_info={
-        "name": "MIT"
-    },
+    contact={"name": "CloudPulse Developer"},
+    license_info={"name": "MIT"},
     openapi_tags=[
         {
             "name": "System",
@@ -57,6 +59,10 @@ All API responses use JSON format.
         {
             "name": "Jobs",
             "description": "Create, retrieve, update, process and delete jobs."
+        },
+        {
+            "name": "Workers",
+            "description": "Background worker metrics and monitoring."
         }
     ]
 )
@@ -66,11 +72,16 @@ models.Base.metadata.create_all(bind=engine)
 
 # --------------------------------------------------
 # GLOBAL DATABASE ERROR HANDLER
-# STEP 24
 # --------------------------------------------------
 
 @app.exception_handler(SQLAlchemyError)
 async def database_error_handler(request: Request, exc: SQLAlchemyError):
+
+    logger.exception(
+        "Database error while processing request: %s %s",
+        request.method,
+        request.url.path
+    )
 
     return JSONResponse(
         status_code=500,
@@ -85,76 +96,45 @@ async def database_error_handler(request: Request, exc: SQLAlchemyError):
 # --------------------------------------------------
 
 class JobCreate(BaseModel):
-    """Request model for creating a new job."""
 
-    name: str = Field(
-        min_length=1,
-        max_length=200,
-        description="Name of the job.",
-        examples=["Generate monthly report"]
-    )
+    name: str = Field(min_length=1, max_length=200)
 
-    priority: int = Field(
-        default=1,
-        ge=1,
-        le=10,
-        description="Job priority from 1 to 10.",
-        examples=[5]
-    )
+    priority: int = Field(default=1, ge=1, le=10)
 
-    max_retries: int = Field(
-        default=3,
-        ge=0,
-        le=10,
-        description="Maximum number of retry attempts.",
-        examples=[3]
-    )
+    max_retries: int = Field(default=3, ge=0, le=10)
 
-    fail_first_n: int = Field(
-        default=0,
-        ge=0,
-        le=10,
-        description="Number of initial attempts that should fail.",
-        examples=[0]
-    )
+    fail_first_n: int = Field(default=0, ge=0, le=10)
 
     idempotency_key: str | None = Field(
         default=None,
-        max_length=100,
-        description="Unique key to prevent duplicate job creation.",
-        examples=["report-001"]
+        max_length=100
     )
 
 
 class JobUpdate(BaseModel):
-    """Request model for updating a pending job."""
 
     name: str | None = Field(
         default=None,
         min_length=1,
-        max_length=200,
-        description="Updated job name."
+        max_length=200
     )
 
     priority: int | None = Field(
         default=None,
         ge=1,
-        le=10,
-        description="Updated priority from 1 to 10."
+        le=10
     )
 
     max_retries: int | None = Field(
         default=None,
         ge=0,
-        le=10,
-        description="Updated maximum retry count."
+        le=10
     )
 
     fail_first_n: int | None = Field(
         default=None,
         ge=0,
-        le=10,
-        description="Updated number of initial failures."
+        le=10
     )
 
 
@@ -162,13 +142,9 @@ class JobUpdate(BaseModel):
 # HOME
 # --------------------------------------------------
 
-@app.get(
-    "/",
-    tags=["System"],
-    summary="API welcome endpoint",
-    description="Returns the CloudPulse API welcome message and version."
-)
+@app.get("/", tags=["System"])
 def home():
+
     return {
         "message": "Welcome to CloudPulse API",
         "status": "running",
@@ -180,17 +156,68 @@ def home():
 # HEALTH CHECK
 # --------------------------------------------------
 
+@app.get("/health", tags=["System"])
+def health_check(db: Session = Depends(get_db)):
+
+    try:
+        db.execute(text("SELECT 1"))
+
+        return {
+            "status": "healthy",
+            "service": "CloudPulse",
+            "database": "connected"
+        }
+
+    except SQLAlchemyError:
+
+        db.rollback()
+
+        logger.exception("Database health check failed.")
+
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "service": "CloudPulse",
+                "database": "disconnected"
+            }
+        )
+
+
+# --------------------------------------------------
+# WORKER METRICS
+# --------------------------------------------------
+
 @app.get(
-    "/health",
-    tags=["System"],
-    summary="Check API health",
-    description="Checks the CloudPulse API health status."
+    "/workers/metrics",
+    tags=["Workers"],
+    summary="Retrieve background worker metrics"
 )
-def health_check():
+def get_all_worker_metrics(db: Session = Depends(get_db)):
+
+    workers = (
+        db.query(models.WorkerMetric)
+        .order_by(models.WorkerMetric.last_heartbeat.desc())
+        .all()
+    )
+
     return {
-        "status": "healthy",
-        "service": "CloudPulse",
-        "database": "connected"
+        "total_workers": len(workers),
+        "workers": [
+            {
+                "worker_id": worker.worker_id,
+                "status": worker.status,
+                "jobs_claimed": worker.jobs_claimed,
+                "jobs_completed": worker.jobs_completed,
+                "jobs_failed": worker.jobs_failed,
+                "jobs_recovered": worker.jobs_recovered,
+                "total_attempts": worker.total_attempts,
+                "last_heartbeat": worker.last_heartbeat,
+                "started_at": worker.started_at,
+                "updated_at": worker.updated_at
+            }
+            for worker in workers
+        ]
     }
 
 
@@ -201,20 +228,7 @@ def health_check():
 @app.post(
     "/jobs",
     status_code=201,
-    tags=["Jobs"],
-    summary="Create a new job",
-    description="""
-Creates a new job in the CloudPulse system.
-
-Supports priority, retry configuration and idempotency
-protection against duplicate requests.
-""",
-    responses={
-        201: {"description": "Job created successfully."},
-        409: {"description": "Idempotency key conflict."},
-        422: {"description": "Invalid request data."},
-        500: {"description": "Database error."}
-    }
+    tags=["Jobs"]
 )
 def create_job(job: JobCreate, db: Session = Depends(get_db)):
 
@@ -232,6 +246,7 @@ def create_job(job: JobCreate, db: Session = Depends(get_db)):
                 or existing_job.max_retries != job.max_retries
                 or existing_job.fail_first_n != job.fail_first_n
             ):
+
                 raise HTTPException(
                     status_code=409,
                     detail="Idempotency key reused for a different job."
@@ -269,55 +284,19 @@ def create_job(job: JobCreate, db: Session = Depends(get_db)):
 # LIST, FILTER, PAGINATE AND SORT JOBS
 # --------------------------------------------------
 
-@app.get(
-    "/jobs",
-    tags=["Jobs"],
-    summary="List and search jobs",
-    description="""
-Returns jobs with filtering, sorting and pagination.
-
-Available sorting fields: id and priority.
-Available sorting orders: asc and desc.
-
-You can combine status and priority filters.
-""",
-    responses={
-        200: {"description": "Jobs retrieved successfully."},
-        422: {"description": "Invalid query parameters."},
-        500: {"description": "Database error."}
-    }
-)
+@app.get("/jobs", tags=["Jobs"])
 def list_jobs(
-    status: str | None = Query(
-        default=None,
-        description="Filter jobs by status, such as pending or completed."
-    ),
-    priority: int | None = Query(
-        default=None,
-        ge=1,
-        le=10,
-        description="Filter jobs by priority from 1 to 10."
-    ),
-    skip: int = Query(
-        default=0,
-        ge=0,
-        description="Number of jobs to skip."
-    ),
-    limit: int = Query(
-        default=10,
-        ge=1,
-        le=100,
-        description="Maximum number of jobs to return."
-    ),
+    status: str | None = Query(default=None),
+    priority: int | None = Query(default=None, ge=1, le=10),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=10, ge=1, le=100),
     sort_by: str = Query(
         default="id",
-        pattern="^(id|priority)$",
-        description="Sort field: id or priority."
+        pattern="^(id|priority)$"
     ),
     order: str = Query(
         default="asc",
-        pattern="^(asc|desc)$",
-        description="Sorting order: asc or desc."
+        pattern="^(asc|desc)$"
     ),
     db: Session = Depends(get_db)
 ):
@@ -332,15 +311,22 @@ def list_jobs(
 
     total_jobs = query.count()
 
-    if sort_by == "priority":
-        sort_column = models.Job.priority
-    else:
-        sort_column = models.Job.id
+    sort_column = (
+        models.Job.priority
+        if sort_by == "priority"
+        else models.Job.id
+    )
 
     if order == "desc":
-        query = query.order_by(sort_column.desc(), models.Job.id.asc())
+        query = query.order_by(
+            sort_column.desc(),
+            models.Job.id.asc()
+        )
     else:
-        query = query.order_by(sort_column.asc(), models.Job.id.asc())
+        query = query.order_by(
+            sort_column.asc(),
+            models.Job.id.asc()
+        )
 
     jobs = query.offset(skip).limit(limit).all()
 
@@ -367,17 +353,7 @@ def list_jobs(
 # GET JOB BY ID
 # --------------------------------------------------
 
-@app.get(
-    "/jobs/{job_id}",
-    tags=["Jobs"],
-    summary="Get a job by ID",
-    description="Retrieves complete information about a specific job.",
-    responses={
-        200: {"description": "Job retrieved successfully."},
-        404: {"description": "Job not found."},
-        500: {"description": "Database error."}
-    }
-)
+@app.get("/jobs/{job_id}", tags=["Jobs"])
 def get_job(job_id: int, db: Session = Depends(get_db)):
 
     job = db.query(models.Job).filter(
@@ -397,7 +373,11 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "status": job.status,
         "max_retries": job.max_retries,
         "retries_used": job.retries_used,
-        "idempotency_key": job.idempotency_key
+        "attempts": job.attempts,
+        "idempotency_key": job.idempotency_key,
+        "locked_by": job.locked_by,
+        "locked_at": job.locked_at,
+        "last_error": job.last_error
     }
 
 
@@ -405,25 +385,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
 # UPDATE JOB
 # --------------------------------------------------
 
-@app.put(
-    "/jobs/{job_id}",
-    tags=["Jobs"],
-    summary="Update a pending job",
-    description="""
-Updates job details.
-
-Only pending jobs can be updated.
-Provide at least one field to update.
-""",
-    responses={
-        200: {"description": "Job updated successfully."},
-        400: {"description": "No update fields provided."},
-        404: {"description": "Job not found."},
-        409: {"description": "Job is not pending."},
-        422: {"description": "Invalid request data."},
-        500: {"description": "Database error."}
-    }
-)
+@app.put("/jobs/{job_id}", tags=["Jobs"])
 def update_job(
     job_id: int,
     update: JobUpdate,
@@ -473,24 +435,13 @@ def update_job(
 
 
 # --------------------------------------------------
-# PROCESS JOB
+# PROCESS JOB USING DATABASE WORKER
 # --------------------------------------------------
 
 @app.post(
     "/jobs/{job_id}/process",
     tags=["Jobs"],
-    summary="Process a job",
-    description="""
-Processes a pending job using the CloudPulse job queue.
-
-Returns the final job status and retry count.
-""",
-    responses={
-        200: {"description": "Job processing finished."},
-        404: {"description": "Job not found."},
-        409: {"description": "Job cannot be processed."},
-        500: {"description": "Database error."}
-    }
+    summary="Process a job using the database worker"
 )
 def process_job(job_id: int, db: Session = Depends(get_db)):
 
@@ -510,53 +461,34 @@ def process_job(job_id: int, db: Session = Depends(get_db)):
             detail=f"Job cannot be processed from status: {job.status}"
         )
 
-    cloud = CloudPulse(
-        max_retries=job.max_retries,
-        enable_delays=False
-    )
+    worker_id = f"api-worker-{uuid4().hex[:8]}"
 
-    key = job.idempotency_key or f"database-job-{job.id}"
+    try:
 
-    cloud.add_job(
-        name=job.name,
-        priority=job.priority,
-        idempotency_key=key
-    )
+        result = process_database_job(
+            db=db,
+            job_id=job_id,
+            worker_id=worker_id
+        )
 
-    cloud.process_all_jobs()
+        return {
+            "message": "Database worker processing finished",
+            **result
+        }
 
-    processed_job = cloud.get_job(0)
+    except ValueError as exc:
 
-    job.status = processed_job["status"]
-    job.retries_used = processed_job["attempts"] - 1
-
-    db.commit()
-    db.refresh(job)
-
-    return {
-        "message": "Job processing finished",
-        "job_id": job.id,
-        "name": job.name,
-        "status": job.status,
-        "retries_used": job.retries_used
-    }
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc)
+        )
 
 
 # --------------------------------------------------
 # DELETE JOB
 # --------------------------------------------------
 
-@app.delete(
-    "/jobs/{job_id}",
-    tags=["Jobs"],
-    summary="Delete a job",
-    description="Permanently deletes a job from the database.",
-    responses={
-        200: {"description": "Job deleted successfully."},
-        404: {"description": "Job not found."},
-        500: {"description": "Database error."}
-    }
-)
+@app.delete("/jobs/{job_id}", tags=["Jobs"])
 def delete_job(job_id: int, db: Session = Depends(get_db)):
 
     job = db.query(models.Job).filter(
