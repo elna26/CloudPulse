@@ -190,4 +190,4 @@ http://127.0.0.1:8000/docs
 
 ## Database Configuration
 
-CloudPulse supports SQLite by default and PostgreSQL when the PostgreSQL password environment
+CloudPulse supports SQLite by default and PostgreSQL when the PostgreSQL password environment (CLOUDPULSE_DB_PASSWORD) is configured.
